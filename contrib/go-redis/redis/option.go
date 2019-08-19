@@ -3,8 +3,8 @@
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
 // Copyright 2016-2019 Datadog, Inc.
 
-package redis // import "gopkg.in/DataDog/dd-trace-go.v1/contrib/go-redis/redis"
-
+//package redis // import "gopkg.in/DataDog/dd-trace-go.v1/contrib/go-redis/redis"
+package redis
 import (
 	"math"
 )

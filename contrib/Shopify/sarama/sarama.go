@@ -197,14 +197,22 @@ func WrapAsyncProducer(saramaConfig *sarama.Config, p sarama.AsyncProducer, opts
 			partition int32
 			offset    int64
 		}
+    type offsetMessage struct {
+      ddtraceOffset int64
+    }
+
 		spans := make(map[spanKey]ddtrace.Span)
 		defer close(wrapped.successes)
 		defer close(wrapped.errors)
+    var ddtraceOffset int64 = 0
 		for {
 			select {
 			case msg := <-wrapped.input:
-				key := spanKey{msg.Topic, msg.Partition, msg.Offset}
-				span := startProducerSpan(cfg, saramaConfig.Version, msg)
+				key := spanKey{msg.Topic, msg.Partition, ddtraceOffset}
+        message := offsetMessage{ ddtraceOffset: ddtraceOffset}
+        msg.Metadata = message
+				ddtraceOffset = ddtraceOffset + 1
+        span := startProducerSpan(cfg, saramaConfig.Version, msg)
 				p.Input() <- msg
 				if saramaConfig.Producer.Return.Successes {
 					spans[key] = span
@@ -215,14 +223,14 @@ func WrapAsyncProducer(saramaConfig *sarama.Config, p sarama.AsyncProducer, opts
 					finishProducerSpan(span, key.partition, key.offset, nil)
 				}
 			case msg, ok := <-p.Successes():
-				if !ok {
+        if !ok {
 					// producer was closed, so exit
 					return
 				}
-				key := spanKey{msg.Topic, msg.Partition, msg.Offset}
+				key := spanKey{msg.Topic, msg.Partition, msg.Metadata.(offsetMessage).ddtraceOffset}
 				if span, ok := spans[key]; ok {
 					delete(spans, key)
-					finishProducerSpan(span, msg.Partition, msg.Offset, nil)
+					finishProducerSpan(span, msg.Partition, key.offset, nil)
 				}
 				wrapped.successes <- msg
 			case err, ok := <-p.Errors():
@@ -230,10 +238,10 @@ func WrapAsyncProducer(saramaConfig *sarama.Config, p sarama.AsyncProducer, opts
 					// producer was closed
 					return
 				}
-				key := spanKey{err.Msg.Topic, err.Msg.Partition, err.Msg.Offset}
+				key := spanKey{err.Msg.Topic, err.Msg.Partition, err.Msg.Metadata.(offsetMessage).ddtraceOffset}
 				if span, ok := spans[key]; ok {
 					delete(spans, key)
-					finishProducerSpan(span, err.Msg.Partition, err.Msg.Offset, err.Err)
+					finishProducerSpan(span, err.Msg.Partition, key.offset, err.Err)
 				}
 				wrapped.errors <- err
 			}

@@ -199,6 +199,7 @@ func WrapAsyncProducer(saramaConfig *sarama.Config, p sarama.AsyncProducer, opts
 		}
     type offsetMessage struct {
       ddtraceOffset int64
+      actualMetadata interface{}
     }
 
 		spans := make(map[spanKey]ddtrace.Span)
@@ -209,7 +210,7 @@ func WrapAsyncProducer(saramaConfig *sarama.Config, p sarama.AsyncProducer, opts
 			select {
 			case msg := <-wrapped.input:
 				key := spanKey{msg.Topic, msg.Partition, ddtraceOffset}
-        message := offsetMessage{ ddtraceOffset: ddtraceOffset}
+        message := offsetMessage{ ddtraceOffset: ddtraceOffset, actualMetadata: msg.Metadata}
         msg.Metadata = message
 				ddtraceOffset = ddtraceOffset + 1
         span := startProducerSpan(cfg, saramaConfig.Version, msg)
@@ -232,6 +233,7 @@ func WrapAsyncProducer(saramaConfig *sarama.Config, p sarama.AsyncProducer, opts
 					delete(spans, key)
 					finishProducerSpan(span, msg.Partition, key.offset, nil)
 				}
+        msg.Metadata = msg.Metadata.(offsetMessage).actualMetadata
 				wrapped.successes <- msg
 			case err, ok := <-p.Errors():
 				if !ok {
@@ -243,6 +245,7 @@ func WrapAsyncProducer(saramaConfig *sarama.Config, p sarama.AsyncProducer, opts
 					delete(spans, key)
 					finishProducerSpan(span, err.Msg.Partition, key.offset, err.Err)
 				}
+        err.Msg.Metadata = err.Msg.Metadata.(offsetMessage).actualMetadata
 				wrapped.errors <- err
 			}
 		}

@@ -202,36 +202,37 @@ func WrapAsyncProducer(saramaConfig *sarama.Config, p sarama.AsyncProducer, opts
       actualMetadata interface{}
     }
 
-		spans := make(map[spanKey]ddtrace.Span)
+		spans := make([]ddtrace.Span, saramaConfig.ChannelBufferSize)
 		defer close(wrapped.successes)
 		defer close(wrapped.errors)
     var ddtraceOffset int64 = 0
 		for {
+      if ddtraceOffset >= int64(saramaConfig.ChannelBufferSize) {
+        ddtraceOffset = 0
+      }
 			select {
 			case msg := <-wrapped.input:
-				key := spanKey{msg.Topic, msg.Partition, ddtraceOffset}
         message := offsetMessage{ ddtraceOffset: ddtraceOffset, actualMetadata: msg.Metadata}
         msg.Metadata = message
 				ddtraceOffset = ddtraceOffset + 1
         span := startProducerSpan(cfg, saramaConfig.Version, msg)
 				p.Input() <- msg
 				if saramaConfig.Producer.Return.Successes {
-					spans[key] = span
+					spans[ddtraceOffset] = span
 				} else {
 					// if returning successes isn't enabled, we just finish the
 					// span right away because there's no way to know when it will
 					// be done
-					finishProducerSpan(span, key.partition, key.offset, nil)
+					finishProducerSpan(span, msg.Partition, ddtraceOffset, nil)
 				}
 			case msg, ok := <-p.Successes():
         if !ok {
 					// producer was closed, so exit
 					return
 				}
-				key := spanKey{msg.Topic, msg.Partition, msg.Metadata.(offsetMessage).ddtraceOffset}
-				if span, ok := spans[key]; ok {
-					delete(spans, key)
-					finishProducerSpan(span, msg.Partition, key.offset, nil)
+				key := msg.Metadata.(offsetMessage).ddtraceOffset
+				if span := spans[key]; span != nil{
+					finishProducerSpan(span, msg.Partition, key, nil)
 				}
         msg.Metadata = msg.Metadata.(offsetMessage).actualMetadata
 				wrapped.successes <- msg
@@ -240,10 +241,9 @@ func WrapAsyncProducer(saramaConfig *sarama.Config, p sarama.AsyncProducer, opts
 					// producer was closed
 					return
 				}
-				key := spanKey{err.Msg.Topic, err.Msg.Partition, err.Msg.Metadata.(offsetMessage).ddtraceOffset}
-				if span, ok := spans[key]; ok {
-					delete(spans, key)
-					finishProducerSpan(span, err.Msg.Partition, key.offset, err.Err)
+				key := err.Msg.Metadata.(offsetMessage).ddtraceOffset
+				if span := spans[key]; span!=nil {
+					finishProducerSpan(span, err.Msg.Partition, key, err.Err)
 				}
         err.Msg.Metadata = err.Msg.Metadata.(offsetMessage).actualMetadata
 				wrapped.errors <- err

@@ -120,7 +120,6 @@ func createWrapperFromClusterClient(tc *ClusterClient) func(oldProcess func(cmd 
 			tc.mu.RLock()
 			ctx := tc.ctx
 			tc.mu.RUnlock()
-			fmt.Println("%v", cmd.Args())
       raw := cmderToString(cmd)
 			parts := strings.Split(raw, " ")
 			length := len(parts) - 1

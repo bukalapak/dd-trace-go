@@ -8,7 +8,6 @@ package redis
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"strconv"
 	"strings"
